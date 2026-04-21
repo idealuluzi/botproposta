@@ -1,4 +1,8 @@
 import json
+import os
+from threading import Thread
+from flask import Flask
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -10,9 +14,24 @@ from telegram.ext import (
 )
 
 ARQUIVO = "dados.json"
+TOKEN = "SEU_TOKEN_AQUI"
 
 # ======================
-# Utilidades
+# SERVIDOR FLASK (RENDER)
+# ======================
+
+web = Flask(__name__)
+
+@web.route("/")
+def home():
+    return "Bot online"
+
+def rodar_web():
+    porta = int(os.environ.get("PORT", 10000))
+    web.run(host="0.0.0.0", port=porta)
+
+# ======================
+# UTILIDADES
 # ======================
 
 def carregar():
@@ -29,7 +48,8 @@ def salvar(dados):
 def barra(p):
     total = 10
     preenchido = int((p / 100) * total)
-    return "🟩" * preenchido + "🟨" * (1 if p < 100 and preenchido < total else 0) + "⬜" * (total - preenchido - (1 if p < 100 and preenchido < total else 0))
+    resto = total - preenchido
+    return "🟩" * preenchido + "⬜" * resto
 
 def status(p):
     if p == 100:
@@ -38,8 +58,7 @@ def status(p):
         return "🚀 *QUASE LÁ*"
     elif p >= 30:
         return "🔥 *EM PROGRESSO*"
-    else:
-        return "⚠️ *EM ALERTA*"
+    return "⚠️ *EM ALERTA*"
 
 # ======================
 # TELAS
@@ -50,13 +69,8 @@ def tela_pessoas():
     texto = "👥 *ESCOLHA A PESSOA*\n\n"
     botoes = []
 
-    if dados:
-        for nome in dados:
-            botoes.append([
-                InlineKeyboardButton(nome, callback_data=f"pessoa|{nome}")
-            ])
-    else:
-        texto += "❌ Nenhuma pessoa cadastrada.\n\n"
+    for nome in dados:
+        botoes.append([InlineKeyboardButton(nome, callback_data=f"pessoa|{nome}")])
 
     botoes.append([InlineKeyboardButton("➕ Nova Pessoa", callback_data="nova_pessoa")])
     return texto, InlineKeyboardMarkup(botoes)
@@ -64,18 +78,12 @@ def tela_pessoas():
 def tela_propostas(pessoa):
     dados = carregar()
     propostas = dados.get(pessoa, {})
-
     texto = f"📌 *PROPOSTAS DE {pessoa}*\n\n"
     botoes = []
 
-    if propostas:
-        for nome, p in propostas.items():
-            texto += f"🎯 *{nome}*\n{barra(p)} {p}%\n{status(p)}\n\n"
-            botoes.append([
-                InlineKeyboardButton(nome, callback_data=f"select|{nome}")
-            ])
-    else:
-        texto += "❌ Nenhuma proposta criada.\n\n"
+    for nome, p in propostas.items():
+        texto += f"🎯 *{nome}*\n{barra(p)} {p}%\n{status(p)}\n\n"
+        botoes.append([InlineKeyboardButton(nome, callback_data=f"select|{nome}")])
 
     botoes.append([InlineKeyboardButton("➕ Nova Proposta", callback_data="nova_proposta")])
     botoes.append([InlineKeyboardButton("⬅️ Trocar Pessoa", callback_data="voltar_pessoas")])
@@ -86,11 +94,7 @@ def tela_proposta(pessoa, proposta):
     dados = carregar()
     p = dados[pessoa][proposta]
 
-    texto = (
-        f"🎯 *{proposta}*\n\n"
-        f"{barra(p)} {p}%\n\n"
-        f"{status(p)}"
-    )
+    texto = f"🎯 *{proposta}*\n\n{barra(p)} {p}%\n\n{status(p)}"
 
     teclado = InlineKeyboardMarkup([
         [
@@ -98,26 +102,15 @@ def tela_proposta(pessoa, proposta):
             InlineKeyboardButton("+10 XP", callback_data="update|10"),
             InlineKeyboardButton("-5 XP", callback_data="update|-5"),
         ],
-        [
-            InlineKeyboardButton("🔄 Resetar", callback_data="reset")
-        ],
-        [
-            InlineKeyboardButton("🗑️ Remover", callback_data="delete|ask")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_propostas")
-        ]
+        [InlineKeyboardButton("🔄 Resetar", callback_data="reset")],
+        [InlineKeyboardButton("🗑️ Remover", callback_data="delete|ask")],
+        [InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_propostas")]
     ])
 
     return texto, teclado
 
 def tela_confirmar_remocao(proposta):
-    texto = (
-        f"❗ *CONFIRMAR REMOÇÃO*\n\n"
-        f"Remover a proposta:\n"
-        f"*{proposta}*?\n\n"
-        "⚠️ Ação irreversível."
-    )
+    texto = f"❗ *CONFIRMAR REMOÇÃO*\n\nRemover *{proposta}*?\n\n⚠️ Irreversível."
 
     teclado = InlineKeyboardMarkup([
         [
@@ -144,16 +137,12 @@ async def receber_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         dados[texto] = {}
         salvar(dados)
         context.user_data["criando_pessoa"] = False
-        msg, kb = tela_pessoas()
-        await update.message.reply_text(f"✅ Pessoa *{texto}* criada!\n\n{msg}", reply_markup=kb, parse_mode="Markdown")
 
     elif context.user_data.get("criando_proposta"):
         pessoa = context.user_data["pessoa"]
         dados[pessoa][texto] = 0
         salvar(dados)
         context.user_data["criando_proposta"] = False
-        msg, kb = tela_propostas(pessoa)
-        await update.message.reply_text(f"✅ Proposta *{texto}* criada!\n\n{msg}", reply_markup=kb, parse_mode="Markdown")
 
 # ======================
 # BOTÕES
@@ -167,7 +156,7 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if acao == "nova_pessoa":
         context.user_data["criando_pessoa"] = True
-        await query.message.reply_text("✍️ Digite o nome da nova pessoa:")
+        await query.message.reply_text("Digite o nome da nova pessoa:")
 
     elif acao.startswith("pessoa|"):
         pessoa = acao.split("|")[1]
@@ -177,7 +166,7 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif acao == "nova_proposta":
         context.user_data["criando_proposta"] = True
-        await query.message.reply_text("✍️ Digite o nome da nova proposta:")
+        await query.message.reply_text("Digite o nome da proposta:")
 
     elif acao.startswith("select|"):
         proposta = acao.split("|")[1]
@@ -200,6 +189,7 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         proposta = context.user_data["proposta"]
         dados[pessoa][proposta] = 0
         salvar(dados)
+
         texto, kb = tela_proposta(pessoa, proposta)
         await query.edit_message_text(texto, reply_markup=kb, parse_mode="Markdown")
 
@@ -213,6 +203,7 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         proposta = context.user_data["proposta"]
         del dados[pessoa][proposta]
         salvar(dados)
+
         texto, kb = tela_propostas(pessoa)
         await query.edit_message_text(texto, reply_markup=kb, parse_mode="Markdown")
 
@@ -235,11 +226,13 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # INIT
 # ======================
 
-app = ApplicationBuilder().token("8236401281:AAEUcGo2msY6QMAPVSwLTaQ-CTQxjHT2njQ").build()
+Thread(target=rodar_web).start()
+
+app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receber_texto))
 app.add_handler(CallbackQueryHandler(botoes))
 
-print("🤖 Bot EJ com pessoas e propostas rodando...")
+print("Bot online")
 app.run_polling()
