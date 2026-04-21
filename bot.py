@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 ARQUIVO = "dados.json"
-TOKEN = "SEU_TOKEN_AQUI"
+TOKEN = "8236401281:AAEUcGo2msY6QMAPVSwLTaQ-CTQxjHT2njQ"
 
 # ======================
 # SERVIDOR FLASK (RENDER)
